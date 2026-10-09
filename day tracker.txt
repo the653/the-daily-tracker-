@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Day Tracker</title>
+  <!-- Firebase Realtime Database Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <style>
+    :root {
+      --primary-blue: #0284c7;
+      --navy: #0f4c81;
+      --not-started: #b45309;
+      --in-progress: #d97706;
+      --deferred: #4b5563;
+      --completed: #16a34a;
+      --bg-color: #f1f5f9;
+      --card-bg: #ffffff;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    body { background-color: var(--bg-color); color: #1e293b; padding: 16px; }
+    .container { max-width: 1100px; margin: 0 auto; background: var(--card-bg); border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); padding: 20px; }
+
+    .header-title { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; }
+    .header-title h1 { font-size: 22px; color: var(--navy); }
+    #sync-status { font-size: 13px; font-weight: 600; color: #16a34a; }
+
+    .user-bar { display: flex; align-items: center; gap: 8px; margin: 16px 0; overflow-x: auto; padding-bottom: 6px; }
+    .user-tab { padding: 8px 16px; border-radius: 20px; border: 1px solid #cbd5e1; background: #fff; color: #475569; font-weight: 600; font-size: 13px; cursor: pointer; transition: 0.2s; white-space: nowrap; }
+    .user-tab.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+    .btn-add-user { padding: 8px 14px; border-radius: 20px; border: 1px dashed #0284c7; background: #e0f2fe; color: #0284c7; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
+
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .kpi-card { padding: 14px; border-radius: 8px; color: #fff; text-align: center; }
+    .kpi-title { font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .kpi-value { font-size: 26px; font-weight: 800; }
+    .bg-total { background-color: var(--navy); }
+    .bg-not-started { background-color: var(--not-started); }
+    .bg-in-progress { background-color: var(--in-progress); }
+    .bg-deferred { background-color: var(--deferred); }
+    .bg-completed { background-color: var(--completed); }
+
+    .controls { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; background: #e0f2fe; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; gap: 12px; }
+    .control-item { display: flex; align-items: center; gap: 8px; }
+    .control-item label { font-weight: 600; font-size: 14px; color: #0369a1; }
+    
+    input[type="date"], select, input[type="text"] { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background: #fff; }
+    input[type="date"]:focus, select:focus, input[type="text"]:focus { outline: none; border-color: var(--primary-blue); }
+
+    .progress-bar-container { display: flex; align-items: center; gap: 8px; }
+    .progress-track { width: 100px; height: 14px; background: #cbd5e1; border-radius: 7px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: var(--completed); transition: width 0.3s; }
+    
+    .btn { padding: 8px 14px; border: none; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; transition: 0.2s; }
+    .btn-add { background: #0284c7; color: white; }
+    .btn-add:hover { background: #0369a1; }
+    .btn-delete { background: #ef4444; color: white; padding: 5px 8px; font-size: 11px; }
+
+    .table-container { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; min-width: 700px; text-align: left; }
+    th { background: #0284c7; color: #fff; font-size: 13px; font-weight: 600; padding: 10px 12px; }
+    td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+    tr:nth-child(even) { background-color: #f8fafc; }
+    tr:hover { background-color: #f1f5f9; }
+
+    .w-sno { width: 50px; text-align: center; }
+    .w-priority { width: 110px; }
+    .w-status { width: 130px; }
+    .w-date { width: 130px; }
+    .w-action { width: 60px; text-align: center; }
+
+    @media (max-width: 600px) {
+      .container { padding: 12px; }
+      .header-title h1 { font-size: 18px; }
+      .controls { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header-title">
+    <h1>📋 Day Tracker</h1>
+    <span id="sync-status">🔄 Connecting to Live Cloud...</span>
+  </div>
+
+  <div class="user-bar">
+    <div id="user-tabs" style="display: flex; gap: 8px;"></div>
+    <button class="btn-add-user" onclick="promptNewUser()">+ Add User</button>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card bg-total"><div class="kpi-title">Total Tasks</div><div class="kpi-value" id="kpi-total">0</div></div>
+    <div class="kpi-card bg-not-started"><div class="kpi-title">Not Started</div><div class="kpi-value" id="kpi-notstarted">0</div></div>
+    <div class="kpi-card bg-in-progress"><div class="kpi-title">In Progress</div><div class="kpi-value" id="kpi-inprogress">0</div></div>
+    <div class="kpi-card bg-deferred"><div class="kpi-title">Deferred</div><div class="kpi-value" id="kpi-deferred">0</div></div>
+    <div class="kpi-card bg-completed"><div class="kpi-title">Completed</div><div class="kpi-value" id="kpi-completed">0</div></div>
+  </div>
+
+  <div class="controls">
+    <div class="control-item">
+      <label for="currentDate">Activities Date:</label>
+      <input type="date" id="currentDate" onchange="renderDayTasks()">
+    </div>
+    
+    <div class="control-item progress-bar-container">
+      <label>Completion:</label>
+      <span id="percent-label" style="font-weight: 700; width: 35px;">0%</span>
+      <div class="progress-track"><div class="progress-fill" id="progress-bar"></div></div>
+    </div>
+
+    <div class="control-item">
+      <button class="btn btn-add" onclick="addNewTask()">+ Add Task</button>
+    </div>
+  </div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th class="w-sno">S.No.</th>
+          <th>Task Name</th>
+          <th class="w-priority">Priority</th>
+          <th class="w-status">Status</th>
+          <th class="w-date">Deferred Date</th>
+          <th>Remarks</th>
+          <th class="w-action">Action</th>
+        </tr>
+      </thead>
+      <tbody id="task-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  // Dedicated multi-device real-time sync database
+  const firebaseConfig = {
+    databaseURL: "https://day-tracker-live-default-rtdb.firebaseio.com"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  const trackerRef = db.ref('family_day_tracker');
+
+  let defaultUsers = ['Milan', 'Madhur', 'Suresha', 'Rekha'];
+  let currentActiveUser = 'Milan';
+  let trackerData = {
+    users: defaultUsers,
+    schedules: {}
+  };
+
+  window.onload = function() {
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('currentDate').value = today;
+
+    // Real-time listener: triggers instantly whenever ANY phone updates
+    trackerRef.on('value', (snapshot) => {
+      const remote = snapshot.val();
+      if (remote) {
+        trackerData.users = remote.users || defaultUsers;
+        trackerData.schedules = remote.schedules || {};
+      } else {
+        // Initialize cloud database if empty
+        saveToCloud();
+      }
+      setSyncStatus('🟢 Live Synced with All Devices', '#16a34a');
+      renderUserTabs();
+      renderDayTasks();
+    }, (error) => {
+      setSyncStatus('⚠️ Cloud Offline - Check Internet', '#dc2626');
+    });
+  };
+
+  function setSyncStatus(msg, color) {
+    const el = document.getElementById('sync-status');
+    el.innerText = msg;
+    el.style.color = color;
+  }
+
+  function saveToCloud() {
+    setSyncStatus('⏳ Syncing...', '#d97706');
+    trackerRef.set(trackerData).then(() => {
+      setSyncStatus('🟢 Live Synced with All Devices', '#16a34a');
+    }).catch(() => {
+      setSyncStatus('⚠️ Sync Error', '#dc2626');
+    });
+  }
+
+  function renderUserTabs() {
+    const tabContainer = document.getElementById('user-tabs');
+    tabContainer.innerHTML = '';
+    
+    if (!trackerData.users.includes(currentActiveUser)) {
+      currentActiveUser = trackerData.users[0] || 'Milan';
+    }
+
+    trackerData.users.forEach(user => {
+      const btn = document.createElement('button');
+      btn.className = `user-tab ${user === currentActiveUser ? 'active' : ''}`;
+      btn.innerText = `👤 ${user}`;
+      btn.onclick = () => {
+        currentActiveUser = user;
+        renderUserTabs();
+        renderDayTasks();
+      };
+      tabContainer.appendChild(btn);
+    });
+  }
+
+  function promptNewUser() {
+    const name = prompt("Enter the name of the new Day Tracker user:");
+    if (name && name.trim() !== '') {
+      const trimmed = name.trim();
+      if (!trackerData.users.includes(trimmed)) {
+        trackerData.users.push(trimmed);
+        currentActiveUser = trimmed;
+        saveToCloud();
+      }
+    }
+  }
+
+  function getSelectedDate() {
+    return document.getElementById('currentDate').value;
+  }
+
+  function getActiveUserTasks() {
+    const date = getSelectedDate();
+    if (!trackerData.schedules) trackerData.schedules = {};
+    if (!trackerData.schedules[currentActiveUser]) {
+      trackerData.schedules[currentActiveUser] = {};
+    }
+    if (!trackerData.schedules[currentActiveUser][date]) {
+      trackerData.schedules[currentActiveUser][date] = [];
+    }
+    return trackerData.schedules[currentActiveUser][date];
+  }
+
+  function renderDayTasks() {
+    const tasks = getActiveUserTasks();
+    const tbody = document.getElementById('task-tbody');
+    tbody.innerHTML = '';
+
+    tasks.forEach((task, index) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="w-sno" style="text-align:center; font-weight:600;">${index + 1}</td>
+        <td><input type="text" value="${escapeHtml(task.name || '')}" oninput="updateTask(${index}, 'name', this.value)" placeholder="Enter ${currentActiveUser}'s task..."></td>
+        <td class="w-priority">
+          <select onchange="updateTask(${index}, 'priority', this.value)">
+            <option ${task.priority === 'Medium' ? 'selected' : ''}>Medium</option>
+            <option ${task.priority === 'High' ? 'selected' : ''}>High</option>
+            <option ${task.priority === 'Low' ? 'selected' : ''}>Low</option>
+          </select>
+        </td>
+        <td class="w-status">
+          <select onchange="updateTask(${index}, 'status', this.value)">
+            <option ${task.status === 'Not Started' ? 'selected' : ''}>Not Started</option>
+            <option ${task.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
+            <option ${task.status === 'Deferred' ? 'selected' : ''}>Deferred</option>
+            <option ${task.status === 'Completed' ? 'selected' : ''}>Completed</option>
+          </select>
+        </td>
+        <td class="w-date"><input type="date" value="${task.deferredDate || ''}" onchange="updateTask(${index}, 'deferredDate', this.value)"></td>
+        <td><input type="text" value="${escapeHtml(task.remarks || '')}" oninput="updateTask(${index}, 'remarks', this.value)" placeholder="Remarks/Notes..."></td>
+        <td class="w-action"><button class="btn btn-delete" onclick="deleteTask(${index})">✕</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    updateKPIs(tasks);
+  }
+
+  function addNewTask() {
+    const tasks = getActiveUserTasks();
+    tasks.push({
+      name: '',
+      priority: 'Medium',
+      status: 'Not Started',
+      deferredDate: '',
+      remarks: ''
+    });
+    saveToCloud();
+  }
+
+  let debounceTimer = null;
+  function updateTask(index, field, value) {
+    const tasks = getActiveUserTasks();
+    if (tasks[index]) {
+      tasks[index][field] = value;
+      if (field === 'status') updateKPIs(tasks);
+      
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        saveToCloud();
+      }, 300);
+    }
+  }
+
+  function deleteTask(index) {
+    const tasks = getActiveUserTasks();
+    tasks.splice(index, 1);
+    saveToCloud();
+  }
+
+  function updateKPIs(tasks) {
+    const total = tasks.length;
+    let notStarted = 0, inProgress = 0, deferred = 0, completed = 0;
+
+    tasks.forEach(t => {
+      if (t.status === 'Not Started') notStarted++;
+      else if (t.status === 'In Progress') inProgress++;
+      else if (t.status === 'Deferred') deferred++;
+      else if (t.status === 'Completed') completed++;
+    });
+
+    const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    document.getElementById('kpi-total').innerText = total;
+    document.getElementById('kpi-notstarted').innerText = notStarted;
+    document.getElementById('kpi-inprogress').innerText = inProgress;
+    document.getElementById('kpi-deferred').innerText = deferred;
+    document.getElementById('kpi-completed').innerText = completed;
+    document.getElementById('percent-label').innerText = percent + '%';
+    document.getElementById('progress-bar').style.width = percent + '%';
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+</script>
+</body>
+</html>
